@@ -90,8 +90,7 @@ body{
 }
 .btn-row{
   display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
+grid-template-columns:repeat(2, minmax(110px,1fr));  gap:8px;
 }
 button{
   border:none;
@@ -202,13 +201,13 @@ button:hover{transform:translateY(-2px)}
   background:#f4f7fa;
   border:1px solid var(--line);
 }
-.charts{
+.tables-section{
   display:grid;
-  grid-template-columns:1fr 1.35fr;
+  grid-template-columns:1fr 1fr;
   gap:8px;
   min-height:0;
 }
-.chart-card{
+.table-card{
   background:rgba(255,255,255,.92);
   backdrop-filter:blur(8px);
   border:1px solid var(--line);
@@ -218,15 +217,36 @@ button:hover{transform:translateY(-2px)}
   display:flex;
   flex-direction:column;
 }
-.chart-card h3{margin:0 0 10px;font-size:14px;color:var(--primary)}
-.chart-wrap{
-  position:relative;
-  flex:1;
-  min-height:0;
+.table-card h3{margin:0 0 12px;font-size:15px;color:var(--primary)}
+.table-wrap{
+  overflow:auto;
+  max-height:100%;
 }
-.chart-wrap canvas{
-  position:absolute !important;
-  inset:0;
+.stats-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+.stats-table th,
+.stats-table td{
+  padding:10px 8px;
+  border-bottom:1px solid var(--line);
+  text-align:right;
+  white-space:nowrap;
+}
+.stats-table th{
+  position:sticky;
+  top:0;
+  background:#f8fbfd;
+  color:var(--primary);
+  font-weight:700;
+  z-index:1;
+}
+.stats-table tbody tr:hover{
+  background:#f8fbfd;
+}
+.stats-table tbody tr:last-child td{
+  border-bottom:none;
 }
 .leaflet-popup-content{
   font-family:Tahoma, Arial, sans-serif;
@@ -289,7 +309,7 @@ button:hover{transform:translateY(-2px)}
 }
 @media (max-width:1200px){
   .cards{grid-template-columns:repeat(3,minmax(100px,1fr))}
-  .charts{grid-template-columns:1fr}
+  .tables-section{grid-template-columns:1fr}
 }
 @media (max-width:900px){
   .app{grid-template-columns:1fr}
@@ -384,28 +404,51 @@ button:hover{transform:translateY(-2px)}
       <div id="map"></div>
     </div>
 
-    <div class="charts">
-      <div class="chart-card">
-        <h3>توزيع الزونات حسب حالة الحصر</h3>
-        <div class="chart-wrap">
-          <canvas id="donutChart"></canvas>
+    
+    <div class="tables-section">
+      <div class="table-card">
+        <h3>إحصائيات حسب حالة الحصر</h3>
+        <div class="table-wrap">
+          <table class="stats-table" id="statusTable">
+            <thead>
+              <tr>
+                <th>حالة الحصر</th>
+                <th>عدد المناطق</th>
+                <th>إجمالي المباني</th>
+                <th>المباني المنجزة</th>
+                <th>نسبة الإنجاز (%)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
 
-      <div class="chart-card">
-        <h3>أعلى 10 زونات حسب إجمالي المباني</h3>
-        <div class="chart-wrap">
-          <canvas id="barChart"></canvas>
+      <div class="table-card">
+        <h3>إحصائيات حسب المحافظة</h3>
+        <div class="table-wrap">
+          <table class="stats-table" id="govTable">
+            <thead>
+              <tr>
+                <th>المحافظة</th>
+                <th>عدد المناطق</th>
+                <th>إجمالي المباني</th>
+                <th>المباني المنجزة</th>
+                <th>نسبة الإنجاز (%)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
         </div>
       </div>
     </div>
+
   </main>
 
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script type="module">
 import { firebaseConfig } from './firebase-config.js';
@@ -442,8 +485,6 @@ let zoneData = {};
 let allFeatures = [];
 let filteredFeatures = [];
 let geoLayer = null;
-let donutChart = null;
-let barChart = null;
 let editMode = false;
 let governoratesLayer = null;
 let governoratesLabelsLayer = null;
@@ -556,7 +597,7 @@ async function loadGeo(){
   populateFilters();
   drawMap();
   updateCards();
-  renderCharts();
+  renderTables();
   updateModeUI();
 }
 
@@ -598,12 +639,13 @@ function popupHtml(p){
     <div class="popup-title">${p.Name || "بدون اسم"}</div>
     <div class="popup-grid">
       <div class="popup-box"><strong>كود الزون</strong>${p.zone_code || "-"}</div>
-      <div class="popup-box"><strong>المحافظة</strong>${p.Gov || "-"}</div>
-      <div class="popup-box"><strong>إجمالي المباني</strong>${safeNum(p["إجمالي المباني"])}</div>
-      <div class="popup-box"><strong>المباني المنجزة</strong>${safeNum(p["المباني المنجزة"])}</div>
-      <div class="popup-box"><strong>نسبة الإنجاز</strong>${safeNum(p["نسبة الإنجاز %"])}%</div>
-      <div class="popup-box"><strong>حالة الحصر</strong>${normalizeStatus(p["حالة الحصر"])}</div>
-    </div>
+  <div class="popup-box"><strong>المحافظة</strong>${p.Gov || "-"}</div>
+  <div class="popup-box"><strong>إجمالي المباني</strong>${safeNum(p["إجمالي المباني"])}</div>
+  <div class="popup-box"><strong>المباني المنجزة</strong>${safeNum(p["المباني المنجزة"])}</div>
+  <div class="popup-box"><strong>عدد الوحدات</strong>${safeNum(p["عدد الوحدات"])}</div>
+  <div class="popup-box"><strong>نسبة الإنجاز</strong>${safeNum(p["نسبة الإنجاز %"])}%</div>
+  <div class="popup-box"><strong>حالة الحصر</strong>${normalizeStatus(p["حالة الحصر"])}</div>
+</div>
   `;
 
   if(!editMode){
@@ -727,62 +769,67 @@ function animateValue(id, end){
   requestAnimationFrame(step);
 }
 
-function renderCharts(){
-  const counts = { 'مناطق حصر جديدة': 0, 'قيد الحصر': 0, 'تم الانتهاء': 0 };
+
+function renderTables(){
+  const statusMap = new Map();
+  const govMap = new Map();
 
   filteredFeatures.forEach(f=>{
-    const s = normalizeStatus(f.properties["حالة الحصر"]);
-    counts[s] = (counts[s] || 0) + 1;
-  });
+    const p = f.properties;
+    const status = normalizeStatus(p["حالة الحصر"]);
+    const gov = p.Gov || "غير محدد";
+    const total = safeNum(p["إجمالي المباني"]);
+    const done = safeNum(p["المباني المنجزة"]);
 
-  const top10 = filteredFeatures
-    .map(f=>({
-      name: f.properties.Name || f.properties.zone_code,
-      total: safeNum(f.properties["إجمالي المباني"])
-    }))
-    .sort((a,b)=>b.total-a.total)
-    .slice(0,10);
-
-  if(donutChart) donutChart.destroy();
-  if(barChart) barChart.destroy();
-
-  donutChart = new Chart(document.getElementById('donutChart'), {
-    type:'doughnut',
-    data:{
-      labels:['مناطق حصر جديدة','قيد الحصر','تم الانتهاء'],
-      datasets:[{
-        data:[counts['مناطق حصر جديدة'], counts['قيد الحصر'], counts['تم الانتهاء']],
-        backgroundColor:['#2f80ed','#f2c94c','#27ae60'],
-        borderWidth:0,
-        hoverOffset:10
-      }]
-    },
-    options:{
-      responsive:true,
-      maintainAspectRatio:false,
-      animation:{ duration:700 },
-      plugins:{ legend:{ position:'bottom' } }
+    if(!statusMap.has(status)){
+      statusMap.set(status, {name:status, zones:0, total:0, done:0});
     }
+    const s = statusMap.get(status);
+    s.zones += 1;
+    s.total += total;
+    s.done += done;
+
+    if(!govMap.has(gov)){
+      govMap.set(gov, {name:gov, zones:0, total:0, done:0});
+    }
+    const g = govMap.get(gov);
+    g.zones += 1;
+    g.total += total;
+    g.done += done;
   });
 
-  barChart = new Chart(document.getElementById('barChart'), {
-    type:'bar',
-    data:{
-      labels: top10.map(x=>x.name),
-      datasets:[{
-        label:'إجمالي المباني',
-        data: top10.map(x=>x.total)
-      }]
-    },
-    options:{
-      indexAxis:'y',
-      responsive:true,
-      maintainAspectRatio:false,
-      animation:{ duration:700 },
-      plugins:{ legend:{ display:false } },
-      scales:{ x:{ beginAtZero:true }, y:{ ticks:{ autoSkip:false } } }
-    }
-  });
+  const statusOrder = ['مناطق حصر جديدة','قيد الحصر','تم الانتهاء'];
+  const statusRows = statusOrder
+    .filter(name => statusMap.has(name))
+    .map(name => statusMap.get(name));
+
+  const govRows = Array.from(govMap.values())
+    .sort((a,b)=> String(a.name).localeCompare(String(b.name),'ar'));
+
+  const statusBody = document.querySelector('#statusTable tbody');
+  const govBody = document.querySelector('#govTable tbody');
+
+  statusBody.innerHTML = statusRows.map(row=>{
+    const percent = row.total ? ((row.done / row.total) * 100).toFixed(2) : '0.00';
+    return `<tr>
+      <td>${row.name}</td>
+      <td>${row.zones.toLocaleString('en-US')}</td>
+      <td>${row.total.toLocaleString('en-US')}</td>
+      <td>${row.done.toLocaleString('en-US')}</td>
+      <td>${percent}</td>
+    </tr>`;
+  }).join('');
+
+  govBody.innerHTML = govRows.map(row=>{
+    const percent = row.total ? ((row.done / row.total) * 100).toFixed(2) : '0.00';
+    return `<tr>
+      <td>${row.name}</td>
+      <td>${row.zones.toLocaleString('en-US')}</td>
+      <td>${row.total.toLocaleString('en-US')}</td>
+      <td>${row.done.toLocaleString('en-US')}</td>
+      <td>${percent}</td>
+    </tr>`;
+  }).join('');
 }
 
 function applyFilters(){
@@ -805,7 +852,7 @@ function applyFilters(){
 
   drawMap();
   updateCards();
-  renderCharts();
+  renderTables();
 }
 
 function resetFilters(){
@@ -817,7 +864,7 @@ function resetFilters(){
   filteredFeatures = allFeatures.slice();
   drawMap();
   updateCards();
-  renderCharts();
+  renderTables();
 }
 
 function runSearch(){
@@ -923,7 +970,7 @@ window.saveZoneEdit = async function(zoneCode){
 
   drawMap();
   updateCards();
-  renderCharts();
+  renderTables();
   alert('تم حفظ التعديل أونلاين.');
 }
 
