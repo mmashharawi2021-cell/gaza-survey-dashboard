@@ -395,7 +395,14 @@ button:hover{transform:translateY(-2px)}
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<script>
+<script type="module">
+import { firebaseConfig } from './firebase-config.js';
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
+import { getFirestore, doc, setDoc, getDocs, collection } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js';
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
 let map = L.map('map', { zoomControl:true }).setView([31.5017,34.4668],12);
 
 const grayCanvas = L.tileLayer(
@@ -438,8 +445,21 @@ function safeNum(v){
   return Number.isFinite(n) ? n : 0;
 }
 
+async function loadUpdatesFromFirestore(){
+  const snapshot = await getDocs(collection(db, "zone_updates"));
+  snapshot.forEach(docSnap => {
+    const data = docSnap.data();
+    const zoneCode = docSnap.id;
+    const feature = allFeatures.find(f => f.properties.zone_code === zoneCode);
+    if(feature){
+      Object.assign(feature.properties, data);
+      feature.properties["حالة الحصر"] = normalizeStatus(feature.properties["حالة الحصر"]);
+    }
+  });
+}
+
 function loadCsv(){
-  Papa.parse("zones.csv",{
+  Papa.parse("./zones.csv",{
     download:true,
     header:true,
     complete:function(results){
@@ -454,26 +474,27 @@ function loadCsv(){
   });
 }
 
-function loadGeo(){
-  fetch("zone.geojson")
-    .then(r=>r.json())
-    .then(data=>{
-      allFeatures = data.features.map(feature=>{
-        const code = feature.properties.zone_code;
-        const row = zoneData[code] || {};
-        const merged = JSON.parse(JSON.stringify(feature));
-        merged.properties = { ...feature.properties, ...row };
-        merged.properties["حالة الحصر"] = normalizeStatus(merged.properties["حالة الحصر"]);
-        return merged;
-      });
+async function loadGeo(){
+  const r = await fetch("./zone.geojson");
+  const data = await r.json();
 
-      filteredFeatures = allFeatures.slice();
-      populateFilters();
-      drawMap();
-      updateCards();
-      renderCharts();
-      updateModeUI();
-    });
+  allFeatures = data.features.map(feature=>{
+    const code = feature.properties.zone_code;
+    const row = zoneData[code] || {};
+    const merged = JSON.parse(JSON.stringify(feature));
+    merged.properties = { ...feature.properties, ...row };
+    merged.properties["حالة الحصر"] = normalizeStatus(merged.properties["حالة الحصر"]);
+    return merged;
+  });
+
+  await loadUpdatesFromFirestore();
+
+  filteredFeatures = allFeatures.slice();
+  populateFilters();
+  drawMap();
+  updateCards();
+  renderCharts();
+  updateModeUI();
 }
 
 function populateSelect(id, values, allLabel){
@@ -547,7 +568,7 @@ function popupHtml(p){
         <input type="number" id="edit_done_${p.zone_code}" value="${safeNum(p["المباني المنجزة"])}">
       </div>
 
-      <button class="btn-success" onclick="saveZoneEdit('${p.zone_code}')">حفظ التعديل</button>
+      <button class="btn-success" onclick="window.saveZoneEdit('${p.zone_code}')">حفظ التعديل</button>
     </div>
   `;
 }
@@ -793,11 +814,23 @@ function updateModeUI(){
   }
 }
 
-function saveZoneEdit(zoneCode){
+window.saveZoneEdit = async function(zoneCode){
   const status = normalizeStatus(document.getElementById(`edit_status_${zoneCode}`).value);
   const total = safeNum(document.getElementById(`edit_total_${zoneCode}`).value);
   const done = safeNum(document.getElementById(`edit_done_${zoneCode}`).value);
   const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+
+  await setDoc(
+    doc(db, "zone_updates", zoneCode),
+    {
+      "حالة الحصر": status,
+      "إجمالي المباني": total,
+      "المباني المنجزة": done,
+      "نسبة الإنجاز %": progress,
+      updatedAt: new Date().toISOString()
+    },
+    { merge:true }
+  );
 
   const targetAll = allFeatures.find(f => f.properties.zone_code === zoneCode);
   if(targetAll){
@@ -828,7 +861,7 @@ function saveZoneEdit(zoneCode){
   drawMap();
   updateCards();
   renderCharts();
-  alert('تم تحديث بيانات الزون محليًا.');
+  alert('تم حفظ التعديل أونلاين.');
 }
 
 loadCsv();
